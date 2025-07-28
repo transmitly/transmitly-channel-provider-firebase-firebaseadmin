@@ -1,27 +1,12 @@
-# Transmitly.ChannelProvider.{Name}
+# Transmitly.ChannelProvider.Firebase.FirebaseAdmin
 
-A [Transmitly](https://github.com/transmitly/transmitly) channel provider that {description}.
+A [Transmitly](https://github.com/transmitly/transmitly) channel provider dispatcher implementation using Google's [Firebase Admin .NET SDK](https://github.com/firebase/firebase-admin-dotnet).
 
 ### Getting started
 
-To use the {Name} channel provider, first install the [NuGet package](https://nuget.org/packages/transmitly.channelprovider.{name}):
+If you're just starting out with Transmitly, you likely want to be using the [transmitly-channel-provider-firebase](https://github.com/transmitly/transmitly-channel-provider-firebase) package instead.
 
-```shell
-dotnet add package Transmitly.ChannelProvider.{Name}
-```
-
-Then add the channel provider using `Add{Name}Support()`:
-
-```csharp
-using Transmitly;
-...
-var communicationClient = new CommunicationsClientBuilder()
-	.Add{Name}Support(options =>
-	{
-		
-	})
-```
-* See the [Transmitly](https://github.com/transmitly/transmitly) project for more details on what a channel provider is and how it can be configured.
+See the [Transmitly](https://github.com/transmitly/transmitly) project for more details on what a channel provider is and how it can be configured.
 
 
 <picture>

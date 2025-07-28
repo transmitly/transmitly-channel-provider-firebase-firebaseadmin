@@ -8,11 +8,11 @@ on:
     - "v[0-9]+.[0-9]+.[0-9]+"
 
     paths:
-      - "src/Transmitly.ChannelProvider.{Name}/**"
+      - "src/Transmitly.ChannelProvider.Firebase.FirebaseAdmin}/**"
 jobs:
   build_test_deploy_channel_provider:
     uses: transmitly/transmitly/.github/workflows/release-channel-provider.yml@main
     with: 
-      channelProviderName: Transmitly.ChannelProvider.{Name}
+      channelProviderName: Transmitly.ChannelProvider.Firebase.FirebaseAdmin
     secrets: inherit
       
