@@ -1,6 +1,6 @@
 # Transmitly.ChannelProvider.Firebase.FirebaseAdmin
 
-A [Transmitly](https://github.com/transmitly/transmitly) channel provider dispatcher implementation using Google's [Firebase Admin .NET SDK](https://github.com/firebase/firebase-admin-dotnet).
+A [Transmitly™](https://github.com/transmitly/transmitly) channel provider dispatcher implementation using Google's [Firebase Admin .NET SDK](https://github.com/firebase/firebase-admin-dotnet).
 
 ### Getting started
 
