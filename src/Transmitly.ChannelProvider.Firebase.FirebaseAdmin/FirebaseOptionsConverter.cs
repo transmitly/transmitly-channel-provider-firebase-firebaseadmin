@@ -37,21 +37,26 @@ namespace Transmitly.ChannelProvider.Firebase.FirebaseAdmin
 		{
 			if (firebaseCredential == null)
 				return null;
+			
+			GoogleCredential? credential = null;
+			
 			if (firebaseCredential.IsDefault)
-				return GoogleCredential.GetApplicationDefault();
-			if (firebaseCredential.IsAccessToken)
-				return GoogleCredential.FromAccessToken(firebaseCredential.AccessToken);
-			if (firebaseCredential.IsJson)
-				return GoogleCredential.FromJson(firebaseCredential.Json);
-			if (firebaseCredential.IsFilePath)
-				return GoogleCredential.FromFile(firebaseCredential.FilePath);
-			if (firebaseCredential.IsStream)
-				return GoogleCredential.FromStream(firebaseCredential.Stream);
+				credential = GoogleCredential.GetApplicationDefault();
+			else if (firebaseCredential.IsAccessToken)
+				credential = GoogleCredential.FromAccessToken(firebaseCredential.AccessToken);
+			else if (firebaseCredential.IsJson)
+				credential = GoogleCredential.FromJson(firebaseCredential.Json);
+			else if (firebaseCredential.IsFilePath)
+				credential = GoogleCredential.FromFile(firebaseCredential.FilePath);
+			else if (firebaseCredential.IsStream)
+				credential = GoogleCredential.FromStream(firebaseCredential.Stream);
+			else
+				throw new NotSupportedException("No suitable credential method was found to generate a google credential.");
 
-			//GoogleCredential.FromComputeCredential
-			//GoogleCredential.FromServiceAccountCredential                       
+			if (credential != null && firebaseCredential != null && firebaseCredential.Scopes.Any())
+				credential = credential.CreateScoped(firebaseCredential.Scopes);
 
-			throw new NotSupportedException("No suitable credential method was found to generate a google credential.");
+			return credential;
 		}
 	}
 }
