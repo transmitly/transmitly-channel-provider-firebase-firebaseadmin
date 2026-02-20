@@ -27,7 +27,7 @@ namespace Transmitly.ChannelProvider.Firebase.FirebaseAdmin
 		{
 			Status = response.IsSuccess ?
 				CommunicationsStatus.Success(FirebaseConstant.Id, "Delivered") :
-				CommunicationsStatus.ServerError(FirebaseConstant.Id, "Failed");
+				CommunicationsStatus.ServerError(FirebaseConstant.Id, "Failed", 0, response.Exception.ToString());
 			ResourceId = response.MessageId;
 		}
 

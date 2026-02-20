@@ -42,7 +42,7 @@ namespace Transmitly.ChannelProvider.Firebase.FirebaseAdmin
 			if (firebaseCredential.IsAccessToken)
 				return GoogleCredential.FromAccessToken(firebaseCredential.AccessToken);
 			if (firebaseCredential.IsJson)
-				return GoogleCredential.FromAccessToken(firebaseCredential.AccessToken);
+				return GoogleCredential.FromJson(firebaseCredential.Json);
 			if (firebaseCredential.IsFilePath)
 				return GoogleCredential.FromFile(firebaseCredential.FilePath);
 			if (firebaseCredential.IsStream)
