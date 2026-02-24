@@ -37,7 +37,7 @@
 		<PackageReference Include="PolySharp" Version="1.15.0" PrivateAssets="All" />
 		<PackageReference Include="FirebaseAdmin" Version="3.4.0" />
 		<PackageReference Include="Transmitly" Version="0.2.2-45.6d185e8" />
-		<PackageReference Include="Transmitly.ChannelProvider.Firebase.Configuration" Version="0.2.2-10.68d19d9" />
+		<PackageReference Include="Transmitly.ChannelProvider.Firebase.Configuration" Version="0.2.2-11.f30e89d" />
 	</ItemGroup>
 	<ItemGroup Condition="'$(TargetFrameworkIdentifier)' == '.NETFramework'">
 		<Reference Include="System.Net.Http" />

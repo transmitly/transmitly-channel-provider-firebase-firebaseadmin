@@ -14,6 +14,7 @@
 
 using FirebaseAdmin;
 using FirebaseAdmin.Messaging;
+using System.Collections.Concurrent;
 using Transmitly.Channel.Push;
 using Transmitly.ChannelProvider.Firebase.Configuration;
 using Transmitly.Util;
@@ -22,11 +23,22 @@ namespace Transmitly.ChannelProvider.Firebase.FirebaseAdmin
 {
 	public sealed class FirebaseAdminChannelProviderDispatcher : ChannelProviderDispatcher<IPushNotification>
 	{
+		private static readonly ConcurrentDictionary<string, Lazy<FirebaseApp>> _apps = new();
 		private readonly FirebaseApp _app;
 		public FirebaseAdminChannelProviderDispatcher(FirebaseOptions options)
 		{
 			Guard.AgainstNull(options);
-			_app = FirebaseApp.Create(FirebaseOptionsConverter.FromFirebaseOptions(options));
+
+			var convertedOptions = FirebaseOptionsConverter.FromFirebaseOptions(options);
+
+			_app = _apps.GetOrAdd(options.AppName,
+				new Lazy<FirebaseApp>(() =>
+				{
+					// There might be another instnace from the hosted app with the same app name
+					var existing = FirebaseApp.GetInstance(options.AppName);
+					return existing ?? FirebaseApp.Create(convertedOptions, options.AppName);
+
+				}, isThreadSafe: true)).Value;
 		}
 
 		public override async Task<IReadOnlyCollection<IDispatchResult?>> DispatchAsync(IPushNotification communication, IDispatchCommunicationContext communicationContext, CancellationToken cancellationToken)

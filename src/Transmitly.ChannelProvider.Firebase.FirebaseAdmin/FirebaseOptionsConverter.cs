@@ -53,9 +53,6 @@ namespace Transmitly.ChannelProvider.Firebase.FirebaseAdmin
 			else
 				throw new NotSupportedException("No suitable credential method was found to generate a google credential.");
 
-			if (credential != null && firebaseCredential != null && firebaseCredential.Scopes.Any())
-				credential = credential.CreateScoped(firebaseCredential.Scopes);
-
 			return credential;
 		}
 	}
