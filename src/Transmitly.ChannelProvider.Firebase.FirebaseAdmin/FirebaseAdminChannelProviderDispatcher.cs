@@ -1,4 +1,4 @@
-﻿// ﻿﻿Copyright (c) Code Impressions, LLC. All Rights Reserved.
+﻿// Copyright (c) Code Impressions, LLC. All Rights Reserved.
 //  
 //  Licensed under the Apache License, Version 2.0 (the "License")
 //  you may not use this file except in compliance with the License.
@@ -14,7 +14,9 @@
 
 using FirebaseAdmin;
 using FirebaseAdmin.Messaging;
+using System.Collections;
 using System.Collections.Concurrent;
+using System.Globalization;
 using Transmitly.Channel.Push;
 using Transmitly.ChannelProvider.Firebase.Configuration;
 using Transmitly.Util;
@@ -25,6 +27,15 @@ namespace Transmitly.ChannelProvider.Firebase.FirebaseAdmin
 	{
 		private static readonly ConcurrentDictionary<string, Lazy<FirebaseApp>> _apps = new();
 		private readonly FirebaseApp _app;
+		private static readonly HashSet<string> _excludedDataKeys = new(StringComparer.OrdinalIgnoreCase)
+		{
+			"trx",
+			"pid",
+			"att",
+			"lnk"
+		};
+		private const int MaxFlattenDepth = 8;
+
 		public FirebaseAdminChannelProviderDispatcher(FirebaseOptions options)
 		{
 			Guard.AgainstNull(options);
@@ -67,21 +78,135 @@ namespace Transmitly.ChannelProvider.Firebase.FirebaseAdmin
 			Error(communicationContext, communication, results.Where(x => !x.Status.IsSuccess()).ToList());
 			return results;
 		}
-
-		private static Dictionary<string, string?>? TryConvertToDictionary(object? content)
+		
+		private static Dictionary<string, string>? TryConvertToDictionary(object? content)
 		{
 			try
 			{
 				if (content == null)
 					return null;
-				var props = content.GetType().GetProperties();
-				var pairDictionary = props.ToDictionary(x => x.Name, x => x.GetValue(content, null)?.ToString());
-				return pairDictionary;
+
+				if (TryExtractDictionaryEntries(content, out var dictionaryEntries))
+					return NormalizeToStringDictionary(dictionaryEntries);
+
+				var descriptorValues = content
+					.GetType()
+					.GetProperties()
+					.Where(prop => prop.GetIndexParameters().Length == 0)
+					.Select(prop => new KeyValuePair<string, object?>(prop.Name, prop.GetValue(content, null)));
+
+				return NormalizeToStringDictionary(descriptorValues);
 			}
 			catch
 			{
 				return null;
 			}
+		}
+
+		private static bool TryExtractDictionaryEntries(object content, out IEnumerable<KeyValuePair<string, object?>> values)
+		{
+			values = [];
+			if (content is IReadOnlyDictionary<string, object?> readOnlyObjectDictionary)
+			{
+				values = readOnlyObjectDictionary;
+				return true;
+			}
+
+			if (content is IDictionary<string, object?> objectDictionary)
+			{
+				values = objectDictionary;
+				return true;
+			}
+
+			if (content is IDictionary<string, string> stringDictionary)
+			{
+				values = stringDictionary.Select(x => new KeyValuePair<string, object?>(x.Key, x.Value));
+				return true;
+			}
+
+			if (content is IDictionary nonGenericDictionary)
+			{
+				values = nonGenericDictionary
+					.Cast<DictionaryEntry>()
+					.Where(entry => entry.Key != null)
+					.Select(entry => new KeyValuePair<string, object?>(entry.Key!.ToString()!, entry.Value));
+				return true;
+			}
+
+			return false;
+		}
+
+		private static Dictionary<string, string>? NormalizeToStringDictionary(IEnumerable<KeyValuePair<string, object?>> values)
+		{
+			var data = new Dictionary<string, string>(StringComparer.Ordinal);
+			foreach (var value in values.Where(x => !string.IsNullOrWhiteSpace(x.Key)))
+			{
+				AppendValue(data, value.Key, value.Value, depth: 0, isRoot: true);
+			}
+
+			return data.Count > 0 ? data : null;
+		}
+
+		private static void AppendValue(Dictionary<string, string> data, string key, object? value, int depth, bool isRoot = false)
+		{
+			if (string.IsNullOrWhiteSpace(key) || value == null)
+				return;
+
+			if (isRoot && _excludedDataKeys.Contains(key))
+				return;
+
+			if (TryConvertScalarToString(value, out var scalar))
+			{
+				data[key] = scalar!;
+				return;
+			}
+
+			if (depth >= MaxFlattenDepth)
+				return;
+
+			if (TryExtractDictionaryEntries(value, out var dictionaryEntries))
+			{
+				foreach (var child in dictionaryEntries.Where(x => !string.IsNullOrWhiteSpace(x.Key)))
+				{
+					AppendValue(data, $"{key}.{child.Key}", child.Value, depth + 1);
+				}
+				return;
+			}
+
+			var properties = value
+				.GetType()
+				.GetProperties()
+				.Where(prop => prop.GetIndexParameters().Length == 0)
+				.ToArray();
+
+			if (properties.Length == 0)
+				return;
+
+			foreach (var property in properties)
+			{
+				AppendValue(data, $"{key}.{property.Name}", property.GetValue(value, null), depth + 1);
+			}
+		}
+
+		private static bool TryConvertScalarToString(object? value, out string? result)
+		{
+			result = null;
+			if (value == null)
+				return false;
+
+			if (value is string str)
+			{
+				result = str;
+				return true;
+			}
+
+			if (value is IFormattable formattable)
+			{
+				result = formattable.ToString(format: null, CultureInfo.InvariantCulture);
+				return true;
+			}
+
+			return false;
 		}
 	}
 }
