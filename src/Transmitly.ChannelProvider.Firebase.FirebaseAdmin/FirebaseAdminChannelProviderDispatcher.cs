@@ -1,4 +1,4 @@
-﻿// Copyright (c) Code Impressions, LLC. All Rights Reserved.
+// Copyright (c) Code Impressions, LLC. All Rights Reserved.
 //  
 //  Licensed under the Apache License, Version 2.0 (the "License")
 //  you may not use this file except in compliance with the License.
@@ -14,9 +14,8 @@
 
 using FirebaseAdmin;
 using FirebaseAdmin.Messaging;
-using System.Collections;
 using System.Collections.Concurrent;
-using System.Globalization;
+using Transmitly.Channel.Configuration.Push;
 using Transmitly.Channel.Push;
 using Transmitly.ChannelProvider.Firebase.Configuration;
 using Transmitly.Util;
@@ -27,14 +26,6 @@ namespace Transmitly.ChannelProvider.Firebase.FirebaseAdmin
 	{
 		private static readonly ConcurrentDictionary<string, Lazy<FirebaseApp>> _apps = new();
 		private readonly FirebaseApp _app;
-		private static readonly HashSet<string> _excludedDataKeys = new(StringComparer.OrdinalIgnoreCase)
-		{
-			"trx",
-			"pid",
-			"att",
-			"lnk"
-		};
-		private const int MaxFlattenDepth = 8;
 
 		public FirebaseAdminChannelProviderDispatcher(FirebaseOptions options)
 		{
@@ -57,18 +48,7 @@ namespace Transmitly.ChannelProvider.Firebase.FirebaseAdmin
 			List<Message> messages = new(communication.Recipient.Count);
 			foreach (var recipient in communication.Recipient)
 			{
-				messages.Add(new Message
-				{
-					Data = TryConvertToDictionary(communicationContext.ContentModel?.Model),
-					Notification = new Notification
-					{
-						Title = communication.Title,
-						Body = communication.Body,
-						ImageUrl = communication.ImageUrl
-					},
-					Token = recipient.IfType(PlatformIdentityAddress.Types.DeviceToken(), recipient.Value),
-					Topic = recipient.IfType(PlatformIdentityAddress.Types.Topic(), recipient.Value)
-				});
+				messages.Add(CreateMessage(communication, recipient));
 			}
 
 			var response = await FirebaseMessaging.GetMessaging(_app).SendEachAsync(messages, cancellationToken);
@@ -78,135 +58,291 @@ namespace Transmitly.ChannelProvider.Firebase.FirebaseAdmin
 			Error(communicationContext, communication, results.Where(x => !x.Status.IsSuccess()).ToList());
 			return results;
 		}
-		
-		private static Dictionary<string, string>? TryConvertToDictionary(object? content)
+
+		private static Message CreateMessage(
+			IPushNotification communication,
+			IPlatformIdentityAddress recipient)
 		{
-			try
+			var defaultHeaders = communication.Headers;
+
+			return new Message
 			{
-				if (content == null)
-					return null;
+				Data = communication.Data,
+				Notification = CreateNotification(communication.Title, communication.Body, communication.ImageUrl),
+				Android = CreateAndroidConfig(communication.Android),
+				Apns = CreateApnsConfig(communication.Apple, defaultHeaders),
+				Webpush = CreateWebpushConfig(communication.Web, defaultHeaders),
+				Token = recipient.IfType(PlatformIdentityAddress.Types.DeviceToken(), recipient.Value),
+				Topic = recipient.IfType(PlatformIdentityAddress.Types.Topic(), recipient.Value)
+			};
+		}
 
-				if (TryExtractDictionaryEntries(content, out var dictionaryEntries))
-					return NormalizeToStringDictionary(dictionaryEntries);
-
-				var descriptorValues = content
-					.GetType()
-					.GetProperties()
-					.Where(prop => prop.GetIndexParameters().Length == 0)
-					.Select(prop => new KeyValuePair<string, object?>(prop.Name, prop.GetValue(content, null)));
-
-				return NormalizeToStringDictionary(descriptorValues);
-			}
-			catch
+		private static Notification? CreateNotification(string? title, string? body, string? imageUrl)
+		{
+			if (string.IsNullOrWhiteSpace(title) &&
+				string.IsNullOrWhiteSpace(body) &&
+				string.IsNullOrWhiteSpace(imageUrl))
 			{
 				return null;
 			}
+
+			return new Notification
+			{
+				Title = title,
+				Body = body,
+				ImageUrl = imageUrl
+			};
 		}
 
-		private static bool TryExtractDictionaryEntries(object content, out IEnumerable<KeyValuePair<string, object?>> values)
+		private static AndroidConfig? CreateAndroidConfig(
+			IAndroidPushNotificationContent? android)
 		{
-			values = [];
-			if (content is IReadOnlyDictionary<string, object?> readOnlyObjectDictionary)
-			{
-				values = readOnlyObjectDictionary;
-				return true;
-			}
+			if (android == null)
+				return null;
 
-			if (content is IDictionary<string, object?> objectDictionary)
-			{
-				values = objectDictionary;
-				return true;
-			}
+			var notification = CreateAndroidNotification(android);
+			var data = android.Data;
+			var priority = MapPriority(android.Priority);
 
-			if (content is IDictionary<string, string> stringDictionary)
-			{
-				values = stringDictionary.Select(x => new KeyValuePair<string, object?>(x.Key, x.Value));
-				return true;
-			}
+			var hasConfigValues = notification != null ||
+				data?.Count > 0 ||
+				!string.IsNullOrWhiteSpace(android.CollapseId) ||
+				priority.HasValue ||
+				android.TimeToLive.HasValue ||
+				!string.IsNullOrWhiteSpace(android.TargetApplicationId) ||
+				android.AllowDeliveryBeforeFirstUnlock.HasValue;
 
-			if (content is IDictionary nonGenericDictionary)
-			{
-				values = nonGenericDictionary
-					.Cast<DictionaryEntry>()
-					.Where(entry => entry.Key != null)
-					.Select(entry => new KeyValuePair<string, object?>(entry.Key!.ToString()!, entry.Value));
-				return true;
-			}
+			if (!hasConfigValues)
+				return null;
 
-			return false;
+			return new AndroidConfig
+			{
+				CollapseKey = android.CollapseId,
+				Priority = priority,
+				TimeToLive = android.TimeToLive,
+				RestrictedPackageName = android.TargetApplicationId,
+				DirectBootOk = android.AllowDeliveryBeforeFirstUnlock,
+				Data = data,
+				Notification = notification
+			};
 		}
 
-		private static Dictionary<string, string>? NormalizeToStringDictionary(IEnumerable<KeyValuePair<string, object?>> values)
+		private static AndroidNotification? CreateAndroidNotification(IAndroidPushNotificationContent android)
 		{
-			var data = new Dictionary<string, string>(StringComparer.Ordinal);
-			foreach (var value in values.Where(x => !string.IsNullOrWhiteSpace(x.Key)))
+			if (string.IsNullOrWhiteSpace(android.Title) &&
+				string.IsNullOrWhiteSpace(android.Body) &&
+				string.IsNullOrWhiteSpace(android.ImageUrl))
 			{
-				AppendValue(data, value.Key, value.Value, depth: 0, isRoot: true);
+				return null;
 			}
 
-			return data.Count > 0 ? data : null;
+			return new AndroidNotification
+			{
+				Title = android.Title,
+				Body = android.Body,
+				ImageUrl = android.ImageUrl
+			};
 		}
 
-		private static void AppendValue(Dictionary<string, string> data, string key, object? value, int depth, bool isRoot = false)
+		private static ApnsConfig? CreateApnsConfig(
+			IApplePushNotificationContent? apple,
+			IReadOnlyDictionary<string, string>? defaultHeaders)
 		{
-			if (string.IsNullOrWhiteSpace(key) || value == null)
-				return;
+			var headers = MergeDictionaries(defaultHeaders, apple?.Headers);
+			var customData = apple?.Data?.Count > 0
+				? ToObjectDictionary(apple.Data)
+				: null;
 
-			if (isRoot && _excludedDataKeys.Contains(key))
-				return;
-
-			if (TryConvertScalarToString(value, out var scalar))
+			ApsAlert? alert = null;
+			Aps? aps = null;
+			ApnsFcmOptions? fcmOptions = null;
+			if (apple != null)
 			{
-				data[key] = scalar!;
-				return;
-			}
-
-			if (depth >= MaxFlattenDepth)
-				return;
-
-			if (TryExtractDictionaryEntries(value, out var dictionaryEntries))
-			{
-				foreach (var child in dictionaryEntries.Where(x => !string.IsNullOrWhiteSpace(x.Key)))
+				alert = CreateApsAlert(apple);
+				aps = CreateAps(apple, alert);
+				if (!string.IsNullOrWhiteSpace(apple.ImageUrl))
 				{
-					AppendValue(data, $"{key}.{child.Key}", child.Value, depth + 1);
+					fcmOptions = new ApnsFcmOptions
+					{
+						ImageUrl = apple.ImageUrl
+					};
 				}
-				return;
 			}
 
-			var properties = value
-				.GetType()
-				.GetProperties()
-				.Where(prop => prop.GetIndexParameters().Length == 0)
-				.ToArray();
+			if (headers?.Count <= 0 && customData?.Count <= 0 && aps == null && fcmOptions == null)
+				return null;
 
-			if (properties.Length == 0)
-				return;
-
-			foreach (var property in properties)
+			return new ApnsConfig
 			{
-				AppendValue(data, $"{key}.{property.Name}", property.GetValue(value, null), depth + 1);
-			}
+				Headers = headers,
+				CustomData = customData,
+				Aps = aps,
+				FcmOptions = fcmOptions
+			};
 		}
 
-		private static bool TryConvertScalarToString(object? value, out string? result)
+		private static ApsAlert? CreateApsAlert(IApplePushNotificationContent apple)
 		{
-			result = null;
-			if (value == null)
-				return false;
+			var hasAlertValues = !string.IsNullOrWhiteSpace(apple.Title) ||
+				!string.IsNullOrWhiteSpace(apple.Body) ||
+				!string.IsNullOrWhiteSpace(apple.Subtitle) ||
+				!string.IsNullOrWhiteSpace(apple.ActionLocalizationKey) ||
+				!string.IsNullOrWhiteSpace(apple.BodyLocalizationKey) ||
+				(apple.BodyLocalizationArguments?.Count > 0) ||
+				!string.IsNullOrWhiteSpace(apple.TitleLocalizationKey) ||
+				(apple.TitleLocalizationArguments?.Count > 0) ||
+				!string.IsNullOrWhiteSpace(apple.SubtitleLocalizationKey) ||
+				(apple.SubtitleLocalizationArguments?.Count > 0);
 
-			if (value is string str)
+			if (!hasAlertValues)
+				return null;
+
+			return new ApsAlert
 			{
-				result = str;
-				return true;
+				Title = apple.Title,
+				Body = apple.Body,
+				Subtitle = apple.Subtitle,
+				ActionLocKey = apple.ActionLocalizationKey,
+				LocKey = apple.BodyLocalizationKey,
+				LocArgs = apple.BodyLocalizationArguments,
+				TitleLocKey = apple.TitleLocalizationKey,
+				TitleLocArgs = apple.TitleLocalizationArguments,
+				SubtitleLocKey = apple.SubtitleLocalizationKey,
+				SubtitleLocArgs = apple.SubtitleLocalizationArguments
+			};
+		}
+
+		private static Aps? CreateAps(IApplePushNotificationContent apple, ApsAlert? alert)
+		{
+			var hasApsValues = alert != null ||
+				apple.Badge.HasValue ||
+				!string.IsNullOrWhiteSpace(apple.Sound) ||
+				apple.IsBackgroundUpdate.HasValue ||
+				apple.IsContentMutable.HasValue ||
+				!string.IsNullOrWhiteSpace(apple.Category) ||
+				!string.IsNullOrWhiteSpace(apple.ThreadId);
+
+			if (!hasApsValues)
+				return null;
+
+			return new Aps
+			{
+				Alert = alert,
+				Badge = apple.Badge,
+				Sound = apple.Sound,
+				ContentAvailable = apple.IsBackgroundUpdate ?? false,
+				MutableContent = apple.IsContentMutable ?? false,
+				Category = apple.Category,
+				ThreadId = apple.ThreadId
+			};
+		}
+
+		private static WebpushConfig? CreateWebpushConfig(
+			IWebPushNotificationContent? web,
+			IReadOnlyDictionary<string, string>? defaultHeaders)
+		{
+			var headers = MergeDictionaries(defaultHeaders, web?.Headers);
+			var data = web?.Data;
+			var notification = web != null ? CreateWebpushNotification(web) : null;
+
+			if (headers?.Count <= 0 && data?.Count <= 0 && notification == null)
+				return null;
+
+			return new WebpushConfig
+			{
+				Headers = headers,
+				Data = data,
+				Notification = notification
+			};
+		}
+
+		private static WebpushNotification? CreateWebpushNotification(IWebPushNotificationContent web)
+		{
+			var hasNotificationValues = !string.IsNullOrWhiteSpace(web.Title) ||
+				!string.IsNullOrWhiteSpace(web.Body) ||
+				!string.IsNullOrWhiteSpace(web.Icon) ||
+				!string.IsNullOrWhiteSpace(web.Badge) ||
+				!string.IsNullOrWhiteSpace(web.ImageUrl) ||
+				!string.IsNullOrWhiteSpace(web.Language) ||
+				web.Renotify.HasValue ||
+				web.RequireInteraction.HasValue ||
+				web.IsSilent.HasValue ||
+				!string.IsNullOrWhiteSpace(web.Tag) ||
+				web.Timestamp.HasValue ||
+				(web.VibratePattern?.Count > 0) ||
+				web.Direction.HasValue;
+
+			if (!hasNotificationValues)
+				return null;
+
+			return new WebpushNotification
+			{
+				Title = web.Title,
+				Body = web.Body,
+				Icon = web.Icon,
+				Badge = web.Badge,
+				Image = web.ImageUrl,
+				Language = web.Language,
+				Renotify = web.Renotify,
+				RequireInteraction = web.RequireInteraction,
+				Silent = web.IsSilent,
+				Tag = web.Tag,
+				TimestampMillis = web.Timestamp?.ToUnixTimeMilliseconds(),
+				Vibrate = web.VibratePattern?.ToArray(),
+				Direction = MapDirection(web.Direction)
+			};
+		}
+
+		private static Priority? MapPriority(AndroidNotificationPriority? priority)
+		{
+			return priority switch
+			{
+				AndroidNotificationPriority.High => Priority.High,
+				AndroidNotificationPriority.Normal => Priority.Normal,
+				_ => null
+			};
+		}
+
+		private static Direction? MapDirection(WebPushDisplayDirection? direction)
+		{
+			return direction switch
+			{
+				WebPushDisplayDirection.Auto => Direction.Auto,
+				WebPushDisplayDirection.LeftToRight => Direction.LeftToRight,
+				WebPushDisplayDirection.RightToLeft => Direction.RightToLeft,
+				_ => null
+			};
+		}
+
+		private static Dictionary<string, object>? ToObjectDictionary(IReadOnlyDictionary<string, string>? data)
+		{
+			if (data == null || data.Count == 0)
+				return null;
+
+			Dictionary<string, object> result = new(data.Count, StringComparer.Ordinal);
+			foreach (var item in data)
+			{
+				result[item.Key] = item.Value;
+			}
+			return result;
+		}
+
+		private static Dictionary<string, string>? MergeDictionaries(params IReadOnlyDictionary<string, string>?[] sources)
+		{
+			Dictionary<string, string>? result = null;
+			foreach (var source in sources)
+			{
+				if (source == null || source.Count == 0)
+					continue;
+
+				result ??= new Dictionary<string, string>(StringComparer.Ordinal);
+				foreach (var item in source)
+				{
+					result[item.Key] = item.Value;
+				}
 			}
 
-			if (value is IFormattable formattable)
-			{
-				result = formattable.ToString(format: null, CultureInfo.InvariantCulture);
-				return true;
-			}
-
-			return false;
+			return result;
 		}
 	}
 }
