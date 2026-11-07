@@ -27,14 +27,12 @@ namespace Transmitly.ChannelProvider.Firebase.FirebaseAdmin
 			var customData = apple?.Data?.Count > 0
 				? FirebaseMessageMappingUtil.ToObjectDictionary(apple.Data)
 				: null;
-
-			ApsAlert? alert = null;
 			Aps? aps = null;
 			ApnsFcmOptions? fcmOptions = null;
 			string? liveActivityToken = null;
 			if (apple != null)
 			{
-				alert = CreateAlert(apple);
+				ApsAlert? alert = CreateAlert(apple);
 				aps = CreateAps(apple, alert);
 				liveActivityToken = apple.LiveActivityToken;
 				if (!string.IsNullOrWhiteSpace(apple.ImageUrl))

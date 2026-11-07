@@ -22,7 +22,7 @@ using Transmitly.Util;
 
 namespace Transmitly.ChannelProvider.Firebase.FirebaseAdmin
 {
-	public sealed class FirebaseAdminChannelProviderDispatcher : ChannelProviderDispatcher<IPushNotification>
+	public sealed partial class FirebaseAdminChannelProviderDispatcher(FirebaseOptions options) : ChannelProviderDispatcher<IPushNotification>
 	{
 		private static readonly HashSet<string> _deviceTokenKeys = new(StringComparer.OrdinalIgnoreCase)
 		{
@@ -34,6 +34,7 @@ namespace Transmitly.ChannelProvider.Firebase.FirebaseAdmin
 			"push_token",
 			"token"
 		};
+
 		private static readonly HashSet<string> _topicKeys = new(StringComparer.OrdinalIgnoreCase)
 		{
 			PlatformIdentityAddress.Types.Topic(),
@@ -43,24 +44,55 @@ namespace Transmitly.ChannelProvider.Firebase.FirebaseAdmin
 			"push_topic",
 			"/topics"
 		};
-		private static readonly Regex _deviceTokenPattern = new(@"^(?:[A-Fa-f0-9]{64}|[A-Za-z0-9_-]{20,})$", RegexOptions.Compiled);
-		private static readonly ConcurrentDictionary<string, Lazy<FirebaseApp>> _apps = new();
-		private readonly FirebaseApp _app;
 
-		public FirebaseAdminChannelProviderDispatcher(FirebaseOptions options)
+		// Same as core's push channel: an APNs hex token, or 20+ URL-safe characters with FCM's optional "<instance id>:" prefix.
+		private const string DeviceTokenPattern = @"^(?:[A-Fa-f0-9]{64}|(?:[A-Za-z0-9_-]+:)?[A-Za-z0-9_-]{20,})$";
+#if NET7_0_OR_GREATER
+		[GeneratedRegex(DeviceTokenPattern)]
+		private static partial Regex DeviceTokenRegex();
+		private static readonly Regex _deviceTokenPattern = DeviceTokenRegex();
+#else
+		private static readonly Regex _deviceTokenPattern = new(DeviceTokenPattern, RegexOptions.Compiled);
+#endif
+		private static readonly ConcurrentDictionary<(string AppName, string Fingerprint, Stream? Stream), Lazy<FirebaseApp>> _apps = new();
+		private static int _appCount;
+		private readonly FirebaseApp _app = GetApp(Guard.AgainstNull(options));
+
+		/// <summary>
+		/// Deletes the Firebase apps this provider created, such as the ones a rotated credential left behind.
+		/// Apps still in use are created again on their next dispatch. Don't call it while a dispatch is in flight.
+		/// </summary>
+		/// <param name="appName">Only delete apps created for this <see cref="FirebaseOptions.AppName"/>; <see langword="null"/> deletes them all.</param>
+		public static void DeleteApps(string? appName = null)
 		{
-			Guard.AgainstNull(options);
+			foreach (var key in _apps.Keys)
+			{
+				if ((appName == null || key.AppName == appName) && _apps.TryRemove(key, out var app) && app.IsValueCreated)
+					app.Value.Delete();
+			}
+		}
 
-			var convertedOptions = FirebaseOptionsConverter.FromFirebaseOptions(options);
+		internal static FirebaseApp GetApp(FirebaseOptions options)
+		{
+			// An app the host created under this name is used as is; the host owns its credential.
+			var hostApp = FirebaseApp.GetInstance(options.AppName);
+			if (hostApp != null)
+				return hostApp;
 
-			_app = _apps.GetOrAdd(options.AppName,
-				new Lazy<FirebaseApp>(() =>
-				{
-					// There might be another instnace from the hosted app with the same app name
-					var existing = FirebaseApp.GetInstance(options.AppName);
-					return existing ?? FirebaseApp.Create(convertedOptions, options.AppName);
-
-				}, isThreadSafe: true)).Value;
+			// Keyed by credential as well as name, so a rotated credential gets a new app and providers with different credentials never share one.
+			var key = (options.AppName, FirebaseOptionsConverter.Fingerprint(options), options.Credential?.Stream);
+			var app = _apps.GetOrAdd(key, k => new Lazy<FirebaseApp>(() =>
+				FirebaseApp.Create(FirebaseOptionsConverter.FromFirebaseOptions(options), $"{k.AppName}#{Interlocked.Increment(ref _appCount)}")));
+			try
+			{
+				return app.Value;
+			}
+			catch
+			{
+				// Don't cache the failure; the next dispatch tries again.
+				((ICollection<KeyValuePair<(string, string, Stream?), Lazy<FirebaseApp>>>)_apps).Remove(new(key, app));
+				throw;
+			}
 		}
 
 		public override async Task<IReadOnlyCollection<IDispatchResult?>> DispatchAsync(IPushNotification communication, IDispatchCommunicationContext communicationContext, CancellationToken cancellationToken)
@@ -94,7 +126,11 @@ namespace Transmitly.ChannelProvider.Firebase.FirebaseAdmin
 				Android = FirebaseAndroidConfigHandler.Create(communication.Android),
 				Apns = FirebaseAppleConfigHandler.Create(communication.Apple, defaultHeaders),
 				Webpush = FirebaseWebpushConfigHandler.Create(communication.Web, defaultHeaders),
+				//todo: Token is deprecated in favor of Fid, but apps send FCM registration tokens, not Firebase
+				// Installation IDs, so this stays until FID recipients are supported. Revisit later.
+#pragma warning disable CS0618
 				Token = token,
+#pragma warning restore CS0618
 				Topic = topic
 			};
 		}

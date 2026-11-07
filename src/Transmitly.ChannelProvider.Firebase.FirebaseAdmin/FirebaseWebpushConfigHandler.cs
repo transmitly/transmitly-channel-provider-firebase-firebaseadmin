@@ -54,7 +54,7 @@ namespace Transmitly.ChannelProvider.Firebase.FirebaseAdmin
 				web.Timestamp.HasValue ||
 				(web.VibratePattern?.Count > 0) ||
 				web.Direction.HasValue ||
-				actions?.Any() == true;
+				actions?.Length != 0;
 
 			if (!hasNotificationValues)
 				return null;
@@ -90,7 +90,7 @@ namespace Transmitly.ChannelProvider.Firebase.FirebaseAdmin
 			};
 		}
 
-		private static IEnumerable<global::FirebaseAdmin.Messaging.Action>? MapActions(IReadOnlyCollection<WebPushNotificationAction>? actions)
+		private static global::FirebaseAdmin.Messaging.Action[]? MapActions(IReadOnlyCollection<WebPushNotificationAction>? actions)
 		{
 			if (actions?.Count <= 0)
 				return null;

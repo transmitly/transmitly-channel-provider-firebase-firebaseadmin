@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
-		<TargetFrameworks>net9.0;net8.0;net6.0</TargetFrameworks>
+		<TargetFrameworks>net10.0;net9.0;net8.0;net6.0</TargetFrameworks>
 	</PropertyGroup>
 	<PropertyGroup>
 		<TargetFrameworks Condition=" '$(OS)' == 'Windows_NT'">net48;net472;$(TargetFrameworks);</TargetFrameworks>
@@ -13,11 +13,16 @@
 		<IsTestProject>true</IsTestProject>
 	</PropertyGroup>
 
-	<ItemGroup>
-		<PackageReference Include="PolySharp" Version="1.15.0" PrivateAssets="All" />
+	<ItemGroup Condition="'$(TargetFramework)' != 'net6.0'">
+		<PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.11.0" />
+		<PackageReference Include="MSTest.TestAdapter" Version="4.5.2" />
+		<PackageReference Include="MSTest.TestFramework" Version="4.5.2" />
+	</ItemGroup>
+	<!-- Test.Sdk 18 and MSTest 4 dropped net6.0; these are the last versions that run it. -->
+	<ItemGroup Condition="'$(TargetFramework)' == 'net6.0'">
 		<PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.13.0" />
-		<PackageReference Include="MSTest.TestAdapter" Version="3.8.3" />
-		<PackageReference Include="MSTest.TestFramework" Version="3.8.3" />
+		<PackageReference Include="MSTest.TestAdapter" Version="3.11.1" />
+		<PackageReference Include="MSTest.TestFramework" Version="3.11.1" />
 	</ItemGroup>
 
 	<ItemGroup>

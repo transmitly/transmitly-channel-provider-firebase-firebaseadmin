@@ -34,6 +34,16 @@ builder.ChannelProvider
 	.Register();
 ```
 
+## Rotating credentials
+
+Firebase apps are cached per `AppName` and credential for the life of the process. A rotated credential, or a replaced key file, gets a new app on the next dispatch. The app built from the old credential stays cached until you release it:
+
+```csharp
+FirebaseAdminChannelProviderDispatcher.DeleteApps(); // or DeleteApps("my-app-name")
+```
+
+Call it when nothing is dispatching. Apps still in use are created again on their next dispatch.
+
 See the [Transmitly](https://github.com/transmitly/transmitly) project for pipeline/channel concepts and end-to-end setup.
 
 ---
